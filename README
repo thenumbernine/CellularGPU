@@ -1,7 +1,4 @@
 OpenCL-driven Conway's Game of Life
 
-based on my C++ framework:
-Common
-Tensor
-GLApp
-CLApp
+based on my C++ framework.
+See Makefile for dependent projects.
