@@ -1,4 +1,5 @@
-#include "CLApp/CLApp.h"
+#include "GLApp/GLApp.h"
+#include "CLCommon/CLCommon.h"
 #include "Common/File.h"
 #include "Common/Macros.h"
 #include "Common/Exception.h"
@@ -29,9 +30,11 @@ template<> inline std::string toNumericString<float>(float value) {
 }
 
 
-struct CellularApp : public CLApp::CLApp {
-	typedef ::CLApp::CLApp Super;
-	
+struct CellularApp : public GLApp::GLApp {
+	typedef ::GLApp::GLApp Super;
+
+	std::shared_ptr<CLCommon::CLCommon> clCommon;
+
 	Tensor::Vector<float,2> viewPos;
 	float viewZoom;
 
@@ -68,6 +71,8 @@ struct CellularApp : public CLApp::CLApp {
 	virtual void init() {
 		Super::init();
 
+		clCommon = std::make_shared<CLCommon::CLCommon>();
+
 		SDL_GL_SetSwapInterval(0);
 
 		glGenTextures(1, &texID);
@@ -77,7 +82,7 @@ struct CellularApp : public CLApp::CLApp {
 		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F_ARB, size(0), size(1), 0, GL_RGBA, GL_FLOAT, nullptr);
 		glBindTexture(GL_TEXTURE_2D, 0);
 		
-		texMem = cl::ImageGL(context, CL_MEM_WRITE_ONLY, GL_TEXTURE_2D, 0, texID);
+		texMem = cl::ImageGL(clCommon->context, CL_MEM_WRITE_ONLY, GL_TEXTURE_2D, 0, texID);
 
 		{
 			std::vector<std::string> sourceStrs = {
@@ -89,22 +94,22 @@ struct CellularApp : public CLApp::CLApp {
 			for (const std::string &s : sourceStrs) {
 				sources.push_back(std::pair<const char *, size_t>(s.c_str(), s.length()));
 			}
-			program = cl::Program(context, sources);
+			program = cl::Program(clCommon->context, sources);
 		}
 
 		try {
-			program.build({device});
+			program.build({clCommon->device});
 		} catch (cl::Error &err) {
 			throw Common::Exception() 
 				<< "failed to build program executable!\n"
-				<< program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(device);
+				<< program.getBuildInfo<CL_PROGRAM_BUILD_LOG>(clCommon->device);
 		}
 
 		updateKernel = cl::Kernel(program, "update");
 
 		for (int i = 0; i < 2; ++i) {
 			updateBuffers.push_back(
-				cl::Buffer(context, CL_MEM_READ_WRITE, size.volume() * 4 * sizeof(float))
+				cl::Buffer(clCommon->context, CL_MEM_READ_WRITE, size.volume() * 4 * sizeof(float))
 			);
 		}
 
@@ -114,14 +119,14 @@ struct CellularApp : public CLApp::CLApp {
 			for (float &i : initData) {
 				i = rand() & 1;
 			}
-			commands.enqueueWriteBuffer(updateBuffers[bufferIndex], CL_TRUE, 0, 4 * sizeof(float) * size.volume(), &initData[0]);
+			clCommon->commands.enqueueWriteBuffer(updateBuffers[bufferIndex], CL_TRUE, 0, 4 * sizeof(float) * size.volume(), &initData[0]);
 		}
 #endif
 #if 0	//preconfigured init
 		{
 			std::vector<float> initData(4 * size.volume());
 			initData[ 0 + 4 * (size(0)/2 + size(0) * size(1)/2) ] = 1e+5f;	//full red
-			commands.enqueueWriteBuffer(updateBuffers[bufferIndex], CL_TRUE, 0, 4 * sizeof(float) * size.volume(), &initData[0]);
+			clCommon->commands.enqueueWriteBuffer(updateBuffers[bufferIndex], CL_TRUE, 0, 4 * sizeof(float) * size.volume(), &initData[0]);
 		}
 #endif
 	}
@@ -141,7 +146,7 @@ PROFILE_BEGIN_FRAME()
 		glFinish();
 	
 		std::vector<cl::Memory> acquireGLMems = {texMem};
-		commands.enqueueAcquireGLObjects(&acquireGLMems);
+		clCommon->commands.enqueueAcquireGLObjects(&acquireGLMems);
 
 		//run kernel
 		cl::NDRange globalSize = cl::NDRange(size(0), size(1));
@@ -149,12 +154,12 @@ PROFILE_BEGIN_FRAME()
 		cl::NDRange offset = cl::NDRange(0, 0);
 
 		//update new buffer and display texture
-		setArgs(updateKernel, updateBuffers[!bufferIndex], updateBuffers[bufferIndex], texMem);
-		commands.enqueueNDRangeKernel(updateKernel, offset, globalSize, localSize);
+		CLCommon::setArgs(updateKernel, updateBuffers[!bufferIndex], updateBuffers[bufferIndex], texMem);
+		clCommon->commands.enqueueNDRangeKernel(updateKernel, offset, globalSize, localSize);
 		bufferIndex = !bufferIndex;
 	
-		commands.enqueueReleaseGLObjects(&acquireGLMems);
-		commands.finish();
+		clCommon->commands.enqueueReleaseGLObjects(&acquireGLMems);
+		clCommon->commands.finish();
 
 		//clear screen buffer
 		Super::update();
