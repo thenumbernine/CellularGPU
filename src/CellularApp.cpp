@@ -4,9 +4,9 @@
 #include "Common/Macros.h"
 #include "Common/Exception.h"
 #include "Profiler/Profiler.h"
+#include "GLCxx/gl.h"
+#include "CLCommon/cl.h"
 
-#include <OpenGL/gl.h>
-#include <OpenCL/cl.hpp>
 #include <Tensor/Vector.h>
 #include <iostream>
 
@@ -35,7 +35,7 @@ struct CellularApp : public GLApp::GLApp {
 
 	std::shared_ptr<CLCommon::CLCommon> clCommon;
 
-	Tensor::Vector<float,2> viewPos;
+	Tensor::vec<float,2> viewPos;
 	float viewZoom;
 
 	bool leftButtonDown;
@@ -43,9 +43,8 @@ struct CellularApp : public GLApp::GLApp {
 	bool rightShiftDown;
 
 	float aspectRatio;
-	Tensor::Vector<int,2> screenSize;
 		
-	Tensor::Vector<int, 2> size;
+	Tensor::vec<int, 2> size;
 
 	GLuint texID;	
 	cl::Memory texMem;
@@ -68,8 +67,8 @@ struct CellularApp : public GLApp::GLApp {
 	, bufferIndex(0)
 	{}
 	
-	virtual void init() {
-		Super::init();
+	virtual void init(GLApp::Init const & args) {
+		Super::init(args);
 
 		clCommon = std::make_shared<CLCommon::CLCommon>();
 
@@ -90,11 +89,7 @@ struct CellularApp : public GLApp::GLApp {
 				"#define SIZE_Y " + std::to_string(size(1)) + "\n",
 				Common::File::read("update.cl")
 			};
-			std::vector<std::pair<const char *, size_t>> sources;
-			for (const std::string &s : sourceStrs) {
-				sources.push_back(std::pair<const char *, size_t>(s.c_str(), s.length()));
-			}
-			program = cl::Program(clCommon->context, sources);
+			program = cl::Program(clCommon->context, sourceStrs);
 		}
 
 		try {
@@ -109,39 +104,38 @@ struct CellularApp : public GLApp::GLApp {
 
 		for (int i = 0; i < 2; ++i) {
 			updateBuffers.push_back(
-				cl::Buffer(clCommon->context, CL_MEM_READ_WRITE, size.volume() * 4 * sizeof(float))
+				cl::Buffer(clCommon->context, CL_MEM_READ_WRITE, size.product() * 4 * sizeof(float))
 			);
 		}
 
 #if 1	//random init
 		{
-			std::vector<float> initData(4 * size.volume());
+			std::vector<float> initData(4 * size.product());
 			for (float &i : initData) {
 				i = rand() & 1;
 			}
-			clCommon->commands.enqueueWriteBuffer(updateBuffers[bufferIndex], CL_TRUE, 0, 4 * sizeof(float) * size.volume(), &initData[0]);
+			clCommon->commands.enqueueWriteBuffer(updateBuffers[bufferIndex], CL_TRUE, 0, 4 * sizeof(float) * size.product(), &initData[0]);
 		}
 #endif
 #if 0	//preconfigured init
 		{
-			std::vector<float> initData(4 * size.volume());
+			std::vector<float> initData(4 * size.product());
 			initData[ 0 + 4 * (size(0)/2 + size(0) * size(1)/2) ] = 1e+5f;	//full red
-			clCommon->commands.enqueueWriteBuffer(updateBuffers[bufferIndex], CL_TRUE, 0, 4 * sizeof(float) * size.volume(), &initData[0]);
+			clCommon->commands.enqueueWriteBuffer(updateBuffers[bufferIndex], CL_TRUE, 0, 4 * sizeof(float) * size.product(), &initData[0]);
 		}
 #endif
 	}
 
-	virtual void resize(int width, int height) {
-		Super::resize(width, height);
-		screenSize = Tensor::Vector<int,2>(width, height);
-		aspectRatio = (float)width / (float)height;
+	virtual void onResize() {
+		Super::onResize();
+		aspectRatio = (float)screenSize.x / (float)screenSize.y;
 		glMatrixMode(GL_PROJECTION);
 		glLoadIdentity();
 		glOrtho(-aspectRatio *.5, aspectRatio * .5, -.5, .5, -1., 1.);
 		glMatrixMode(GL_MODELVIEW);
 	}
 
-	virtual void update() {
+	virtual void onUpdate() {
 PROFILE_BEGIN_FRAME()
 		glFinish();
 	
@@ -162,7 +156,7 @@ PROFILE_BEGIN_FRAME()
 		clCommon->commands.finish();
 
 		//clear screen buffer
-		Super::update();
+		Super::onUpdate();
 	
 		//transforms
 		glLoadIdentity();
@@ -199,7 +193,7 @@ PROFILE_END_FRAME()
 						} 
 					} else {
 						if (dx || dy) {
-							viewPos += Tensor::Vector<float,2>(-(float)dx * aspectRatio / (float)screenSize(0), (float)dy / (float)screenSize(1));
+							viewPos += Tensor::vec<float,2>(-(float)dx * aspectRatio / (float)screenSize(0), (float)dy / (float)screenSize(1));
 						}
 					}
 				}
@@ -233,4 +227,3 @@ PROFILE_END_FRAME()
 };
 
 GLAPP_MAIN(CellularApp)
-
